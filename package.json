@@ -1,0 +1,16 @@
+{
+  "name": "token-list",
+  "version": "1.0.0",
+  "description": "DeFi Token List Service",
+  "main": "index.js",
+  "repository": "https://github.com/Firepot-Finance/token-list.git",
+  "author": "Tom Daniel <0xtomdaniel@gmail.com>",
+  "license": "Apache-2.0",
+  "private": false,
+  "scripts": {
+    "start": "functions-framework --target=helloWorld"
+  },
+  "dependencies": {
+    "@google-cloud/functions-framework": "^3.2.0"
+  }
+}
