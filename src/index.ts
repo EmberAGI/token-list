@@ -134,7 +134,7 @@ functions.http('tokenImage', async (req: any, res: any) => {
         redisClient.set(tokenListKey, JSON.stringify(tokenList));
       } catch (err) {
         console.error('Error fetching token list from Coingecko:', err);
-        return res.status(500).json({ error: 'Error fetching token list' });
+        return res.status(500).json({ error: `Error fetching token list:: ${err}` });
       }
     }
 
@@ -153,7 +153,7 @@ functions.http('tokenImage', async (req: any, res: any) => {
       }
     } catch (err) {
       console.error('Error fetching token image from Coingecko:', err);
-      return res.status(404).json({ error: 'Token image not found' });
+      return res.status(404).json({ error: `Token image not found:: ${err}` });
     }
   }
 
