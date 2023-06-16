@@ -1,5 +1,6 @@
 import * as functions from '@google-cloud/functions-framework';
 import { createClient } from 'redis';
+import fetch from 'node-fetch';
 
 type Size = 'xs' | 'sm' | 'lg';
 
