@@ -7,6 +7,7 @@
   "author": "Tom Daniel <0xtomdaniel@gmail.com>",
   "license": "Apache-2.0",
   "private": false,
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "functions-framework --target=tokenImage",
