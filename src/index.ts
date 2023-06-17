@@ -2,6 +2,10 @@ import * as functions from '@google-cloud/functions-framework';
 import { createClient } from 'redis';
 import fetch from 'node-fetch';
 
+interface ClearCacheQuery {
+  clearCache: string;
+}
+
 type Size = 'xs' | 'sm' | 'lg';
 
 interface Query {
@@ -22,7 +26,9 @@ interface TokenImageUrl {
 }
 
 interface TokenDetails {
+  id: string;
   image: TokenImageUrl;
+  market_cap_rank: number | null;
 }
 
 const REDISHOST = process.env.REDISHOST || 'localhost';
@@ -40,7 +46,8 @@ redisClient.connect();
 const getTokenListFromCache = async (tokenListKey: string) => {
   console.log('getTokenListFromCache');
   const tokenListString = await redisClient.get(tokenListKey);
-  return tokenListString ? JSON.parse(tokenListString) as Token[] : null;
+  const tokenList = tokenListString ? JSON.parse(tokenListString) as Token[] : null;
+  return tokenList;
 }
 
 const getTokenImageFromCache = async (tokenImageKey: string) => {
@@ -52,6 +59,9 @@ const getTokenImageFromCache = async (tokenImageKey: string) => {
 const getTokenListFromCoingecko = async () => {
   console.log('getTokenListFromCoingecko');
   const response = await fetch(`https://api.coingecko.com/api/v3/coins/list`);
+  if (!response.ok) {
+      throw new Error(`Error fetching token list from CoinGecko: ${response.statusText}`);
+  }
   const tokenList = await response.json() as Token[];
   if (!tokenList) {
       throw new Error(`Token list not found on CoinGecko`);
@@ -59,19 +69,49 @@ const getTokenListFromCoingecko = async () => {
   return tokenList;
 }
 
-const getTokenImageFromCoingecko = async (tokenId: string, size: Size) => {
+const getTopTokenImageFromCoingecko = async (tokenList: Token[], size: Size) => {
   console.log('getTokenImageFromCoingecko');
-  const tokenDetailsResponse = await fetch(`https://api.coingecko.com/api/v3/coins/${tokenId}`);
-  const tokenDetails = await tokenDetailsResponse.json() as TokenDetails;
-  console.log('tokenDetails.image.large', tokenDetails.image);
+  
+  const fetchDetails = async (t: Token) => {
+    try {
+      const response = await fetch(`https://api.coingecko.com/api/v3/coins/${t.id}`);
+      if (!response.ok) {
+        throw new Error(`Error fetching details for token ${t.id}: ${response.statusText}`);
+      }
+      const details = await response.json() as TokenDetails;
+      return {
+        id: details.id,
+        image: details.image,
+        market_cap_rank: details.market_cap_rank
+      };
+    } catch (err) {
+      console.error(`Error fetching details for token ${t.id}:`, err);
+      throw err;
+    }
+  };
+  
+  const multipleTokens = await Promise.all(tokenList.map(fetchDetails));
+
+  const sortedTokens = multipleTokens.sort((a, b) => {
+    if (a.market_cap_rank === null) return 1;
+    if (b.market_cap_rank === null) return -1;
+    return a.market_cap_rank - b.market_cap_rank;
+  });
+  
+  const lowestRankToken = sortedTokens[0];
+  
   let tokenImageUrl: string;
   switch (size) {
-    case 'xs': tokenImageUrl = tokenDetails.image.thumb; break;
-    case 'sm': tokenImageUrl = tokenDetails.image.small; break;
-    case 'lg': tokenImageUrl = tokenDetails.image.large; break;
-    default: throw new Error(`Invalid size ${size}`);
+    case 'xs': tokenImageUrl = lowestRankToken.image.thumb; break;
+    case 'sm': tokenImageUrl = lowestRankToken.image.small; break;
+    case 'lg': tokenImageUrl = lowestRankToken.image.large; break;
   }
+  
   const tokenImageResponse = await fetch(tokenImageUrl);
+  if (!tokenImageResponse.ok) {
+    throw new Error(`Error fetching token image from CoinGecko: ${tokenImageResponse.statusText}`);
+  }
+  
   const tokenImageArrayBuffer = await tokenImageResponse.arrayBuffer();
   return Buffer.from(tokenImageArrayBuffer);
 }
@@ -90,6 +130,14 @@ const getImageFormat = (buffer: Buffer) => {
   }
 }
 
+function isClearCacheQuery(obj: any): obj is ClearCacheQuery {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    ['true', 'false'].includes(obj.clearCache)
+  );
+}
+
 function isQuery(obj: any): obj is Query {
   return (
     typeof obj === 'object' &&
@@ -101,6 +149,10 @@ function isQuery(obj: any): obj is Query {
 
 functions.http('tokenImage', async (req: any, res: any) => {
   const query = req.query;
+  if (isClearCacheQuery(query) && query.clearCache === 'true') {
+    await redisClient.flushDb();
+    return res.status(200).json({ message: 'Cache cleared' });
+  }
   if (!isQuery(query)) {
     const err = { error: 'Invalid query' };
     console.error(err);
@@ -139,16 +191,11 @@ functions.http('tokenImage', async (req: any, res: any) => {
       }
     }
 
-    const token = tokenList.find((t) => t.symbol === tokenSymbol.toLowerCase());
-
-    if (!token) {
-      const err = { error: `Token with symbol ${tokenSymbol} not found` };
-      console.error(err);
-      return res.status(404).json(err);
-    }
-
+    let matchingTokens = tokenList.filter((t) => t.symbol === tokenSymbol.toLowerCase());
+    console.warn(matchingTokens);
+    
     try {
-      tokenImage = await getTokenImageFromCoingecko(token.id, imageSize);
+      tokenImage = await getTopTokenImageFromCoingecko(matchingTokens, imageSize);
       if (!tokenImage) {
         throw new Error(`Token image not found on CoinGecko`);
       }
